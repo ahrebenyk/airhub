@@ -20,11 +20,16 @@ public class MainFrame extends JFrame {
             "ЗВІТ", "СТАТИСТИКА", "СТАТУС", "ОЧИЩЕННЯ"};
     private static final int WINDOW_WIDTH = 1200, WINDOW_HEIGHT = 750;
     private static final int CASCADE_STEP = 20;
+    static final String SCHEDULE_SQL = """
+            SELECT f.sched_time AS "Час", f.flight_no AS "Рейс", a.name AS "Авіакомпанія", f.type AS "Тип",
+                   f.city AS "Місто", f.gate AS "Гейт", f.status AS "Статус"
+            FROM flights f JOIN airlines a ON a.id = f.airline_id
+            ORDER BY f.sched_time""";
 
     private final JDesktopPane desktop = new JDesktopPane();
 
     public MainFrame() {
-        super("AirHub — " + Db.setting("airport_name"));
+        super(title(Db.setting("airport_name")));
         // closing is handled manually so that the logout is written to the log
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -36,7 +41,7 @@ public class MainFrame extends JFrame {
         setSize(WINDOW_WIDTH, WINDOW_HEIGHT);
         setLocationRelativeTo(null);
         add(desktop);
-        Db.User user = Db.user;
+        Db.User user = Db.user();
         add(new JLabel(" Користувач: " + user.login() + " (" + user.role() + ")"), BorderLayout.SOUTH);
 
         JMenuBar bar = new JMenuBar();
@@ -77,6 +82,11 @@ public class MainFrame extends JFrame {
         setJMenuBar(bar);
     }
 
+    // the airport name is an admin setting and may be deleted or left empty
+    static String title(String airportName) {
+        return airportName == null || airportName.isBlank() ? "AirHub" : "AirHub — " + airportName;
+    }
+
     private void addItem(JMenu menu, String text, String iconKey, Runnable action) {
         JMenuItem item = new JMenuItem(text, iconKey == null ? null : Ui.icon(iconKey));
         item.addActionListener(e -> action.run());
@@ -98,11 +108,7 @@ public class MainFrame extends JFrame {
     }
 
     private void showReport() {
-        open(new ReportForm("Звіт: розклад рейсів", """
-                SELECT f.sched_time AS "Час", f.flight_no AS "Рейс", a.name AS "Авіакомпанія", f.type AS "Тип",
-                       f.city AS "Місто", f.gate AS "Гейт", f.status AS "Статус"
-                FROM flights f JOIN airlines a ON a.id = f.airline_id
-                ORDER BY f.sched_time"""));
+        open(new ReportForm("Звіт: розклад рейсів", SCHEDULE_SQL));
         Db.log("ЗВІТ", "Розклад рейсів");
     }
 

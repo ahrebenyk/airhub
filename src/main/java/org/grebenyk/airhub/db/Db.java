@@ -20,16 +20,17 @@ public class Db {
         }
     }
 
-    public static User user;
+    private static User user;
     private static Connection connection;
 
     public static void init() throws SQLException {
         init(URL);
     }
 
-    // a separate URL is used by tests to work with an in-memory database
-    static void init(String url) throws SQLException {
+    /** Opens the database at url (tests use an in-memory database); the session starts without a user. */
+    public static void init(String url) throws SQLException {
         connection = DriverManager.getConnection(url, DB_USER, DB_PASSWORD);
+        user = null;
         update("RUNSCRIPT FROM 'classpath:/schema.sql' CHARSET 'UTF-8'");
         // initial data is loaded only into a new (empty) database; existing data is never overwritten
         if (((Number) scalar("SELECT COUNT(*) FROM users")).intValue() == 0) {
@@ -98,11 +99,18 @@ public class Db {
         return d.format(d.getSecond() == 0 ? TO_MINUTES : TO_SECONDS);
     }
 
+    /** Signed-in user, or null before a successful login. */
+    public static User user() {
+        return user;
+    }
+
+    /** Checks the password against the stored hash; on success the user becomes the current one, otherwise returns null. */
     public static User login(String login, String password) throws SQLException {
-        String sql = "SELECT id, login, role, can_edit, can_reports FROM users WHERE login = ? AND password = ?";
-        try (PreparedStatement st = prepare(sql, login, password); ResultSet rs = st.executeQuery()) {
-            if (!rs.next()) return null;
-            return new User(rs.getInt(1), rs.getString(2), rs.getString(3), rs.getBoolean(4), rs.getBoolean(5));
+        String sql = "SELECT id, login, role, can_edit, can_reports, password FROM users WHERE login = ?";
+        try (PreparedStatement st = prepare(sql, login); ResultSet rs = st.executeQuery()) {
+            if (!rs.next() || !Passwords.verify(password, rs.getString(6))) return null;
+            user = new User(rs.getInt(1), rs.getString(2), rs.getString(3), rs.getBoolean(4), rs.getBoolean(5));
+            return user;
         }
     }
 

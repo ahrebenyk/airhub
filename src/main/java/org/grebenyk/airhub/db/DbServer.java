@@ -25,7 +25,9 @@ public class DbServer {
     }
 
     /** Procedure CLEAN_LOG(days): deletes log records older than days days; returns the number deleted. */
-    public static int cleanLog(Connection c, int days) throws SQLException {
+    public static int cleanLog(Connection c, Integer days) throws SQLException {
+        // days < 1 would move the boundary to now or into the future and delete the whole log
+        if (days == null || days < 1) throw new SQLException("Кількість днів зберігання журналу має бути цілим числом від 1");
         // DATEADD with a negative number of days gives the moment "days days ago"
         try (PreparedStatement st = c.prepareStatement("DELETE FROM user_log WHERE ts < DATEADD('DAY', ?, CURRENT_TIMESTAMP)")) {
             st.setInt(1, -days);
@@ -54,6 +56,42 @@ public class DbServer {
                 try (PreparedStatement st = c.prepareStatement(LOG_STATUS)) {
                     st.setString(1, newRow[FLIGHT_NO] + ": " + oldRow[STATUS] + " -> " + newRow[STATUS]);
                     st.executeUpdate();
+                }
+            }
+        }
+    }
+
+    /**
+     * BEFORE INSERT/UPDATE/DELETE trigger on users: stores passwords only as hashes
+     * and keeps at least one administrator so the system cannot be locked out.
+     */
+    public static class UserTrigger implements Trigger {
+        // row array indexes match the column order of the users table in schema.sql
+        private static final int PASSWORD = 2, ROLE = 3;
+        private static final String ADMIN = "ADMIN";
+
+        @Override
+        public void init(Connection c, String schema, String trigger, String table, boolean before, int type) {
+        }
+
+        // newRow is null on DELETE; a password that is already a hash (unchanged on edit) is kept as is
+        @Override
+        public void fire(Connection c, Object[] oldRow, Object[] newRow) throws SQLException {
+            if (newRow != null && newRow[PASSWORD] != null && !Passwords.isHashed(newRow[PASSWORD].toString())) {
+                newRow[PASSWORD] = Passwords.hash(newRow[PASSWORD].toString());
+            }
+            boolean losesAdmin = oldRow != null && ADMIN.equals(oldRow[ROLE]) && (newRow == null || !ADMIN.equals(newRow[ROLE]));
+            if (losesAdmin && adminCount(c) <= 1) {
+                throw new SQLException("Не можна видалити останнього адміністратора або змінити його роль");
+            }
+        }
+
+        private static long adminCount(Connection c) throws SQLException {
+            try (PreparedStatement st = c.prepareStatement("SELECT COUNT(*) FROM users WHERE role = ?")) {
+                st.setString(1, ADMIN);
+                try (ResultSet rs = st.executeQuery()) {
+                    rs.next();
+                    return rs.getLong(1);
                 }
             }
         }

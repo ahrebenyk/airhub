@@ -15,7 +15,6 @@ class DbTest {
     void setUp() throws SQLException {
         // each test gets its own in-memory database; the project database in ./data is not touched
         Db.init("jdbc:h2:mem:" + UUID.randomUUID());
-        Db.user = null;
     }
 
     @Test
@@ -89,10 +88,108 @@ class DbTest {
     @Test
     void logWritesCurrentUser() throws SQLException {
         Db.log("НЕВДАЛИЙ ВХІД", "");
-        Db.user = Db.login("operator", "1111");
+        Db.login("operator", "1111");
         Db.log("ВХІД", "");
         assertEquals("-", Db.scalar("SELECT login FROM user_log WHERE action = 'НЕВДАЛИЙ ВХІД'"));
         assertEquals("operator", Db.scalar("SELECT login FROM user_log WHERE action = 'ВХІД'"));
+    }
+
+    @Test
+    void loginSetsCurrentUserOnlyOnSuccess() throws SQLException {
+        assertNull(Db.user());
+        Db.login("admin", "wrong");
+        assertNull(Db.user());
+        Db.login("operator", "1111");
+        assertEquals("operator", Db.user().login());
+    }
+
+    @Test
+    void passwordsAreStoredAsHashes() throws SQLException {
+        String stored = (String) Db.scalar("SELECT password FROM users WHERE login = 'admin'");
+        assertTrue(stored.startsWith(Passwords.PREFIX));
+        assertFalse(stored.contains("admin"));
+        assertEquals(0L, Db.scalar("SELECT COUNT(*) FROM users WHERE password NOT LIKE 'pbkdf2$%'"));
+    }
+
+    @Test
+    void changedPasswordIsHashedAndUnchangedHashIsKept() throws SQLException {
+        Db.update("UPDATE users SET password = 'new-pass' WHERE login = 'guest'");
+        assertNotNull(Db.login("guest", "new-pass"));
+        assertNull(Db.login("guest", "guest"));
+        String hash = (String) Db.scalar("SELECT password FROM users WHERE login = 'guest'");
+        // editing other fields in the form sends the stored hash back unchanged
+        Db.update("UPDATE users SET can_reports = TRUE, password = ? WHERE login = 'guest'", hash);
+        assertNotNull(Db.login("guest", "new-pass"));
+    }
+
+    @Test
+    void plainPasswordsOfOldDatabaseAreMigrated() throws SQLException {
+        String url = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        Db.init(url);
+        // simulate a database of version 1.0.0: no trigger, plain password
+        Db.update("DROP TRIGGER users_trg");
+        Db.update("UPDATE users SET password = 'plain' WHERE login = 'operator'");
+        Db.init(url);
+        assertNotNull(Db.login("operator", "plain"));
+        assertEquals(0L, Db.scalar("SELECT COUNT(*) FROM users WHERE password NOT LIKE 'pbkdf2$%'"));
+    }
+
+    @Test
+    void lastAdminCannotBeDeletedOrDemoted() {
+        assertThrows(SQLException.class, () -> Db.update("DELETE FROM users WHERE login = 'admin'"));
+        assertThrows(SQLException.class, () -> Db.update("UPDATE users SET role = 'USER' WHERE login = 'admin'"));
+    }
+
+    @Test
+    void adminCanBeDeletedWhenAnotherAdminExists() throws SQLException {
+        Db.update("UPDATE users SET role = 'ADMIN' WHERE login = 'operator'");
+        assertEquals(1, Db.update("DELETE FROM users WHERE login = 'admin'"));
+        assertThrows(SQLException.class, () -> Db.update("DELETE FROM users WHERE login = 'operator'"));
+    }
+
+    @Test
+    void cleanLogRejectsNonPositiveDays() {
+        Db.log("ВХІД", "new");
+        assertThrows(SQLException.class, () -> Db.scalar("SELECT CLEAN_LOG(0)"));
+        assertThrows(SQLException.class, () -> Db.scalar("SELECT CLEAN_LOG(-5)"));
+        assertThrows(SQLException.class, () -> Db.scalar("SELECT CLEAN_LOG(NULL)"));
+    }
+
+    @Test
+    void cleanLogRejectsNonNumericSetting() throws SQLException {
+        Db.update("UPDATE settings SET val = 'abc' WHERE name = 'log_keep_days'");
+        SQLException e = assertThrows(SQLException.class, () -> Db.scalar("SELECT CLEAN_LOG(CAST(GET_SETTING('log_keep_days') AS INT))"));
+        assertEquals(22018, e.getErrorCode());
+    }
+
+    @Test
+    void airlineWithFlightsCannotBeDeleted() throws SQLException {
+        SQLException e = assertThrows(SQLException.class, () -> Db.update("DELETE FROM airlines WHERE name = 'МАУ'"));
+        assertEquals(23503, e.getErrorCode());
+        Db.update("INSERT INTO airlines (name, country) VALUES ('Ryanair', 'Ірландія')");
+        assertEquals(1, Db.update("DELETE FROM airlines WHERE name = 'Ryanair'"));
+    }
+
+    @Test
+    void duplicateLoginAndAirlineAreRejected() {
+        SQLException e = assertThrows(SQLException.class,
+                () -> Db.update("INSERT INTO users (login, password, role) VALUES ('admin', 'x', 'USER')"));
+        assertEquals(23505, e.getErrorCode());
+        assertThrows(SQLException.class, () -> Db.update("INSERT INTO airlines (name) VALUES ('LOT')"));
+    }
+
+    @Test
+    void flightRequiresExistingAirlineAndValidType() {
+        String sql = "INSERT INTO flights (flight_no, airline_id, type, city, sched_time, status)"
+                + " VALUES ('X1', ?, ?, 'Київ', '2026-11-01 10:00', 'За розкладом')";
+        assertEquals(23506, assertThrows(SQLException.class, () -> Db.update(sql, 99, "Виліт")).getErrorCode());
+        assertEquals(23513, assertThrows(SQLException.class, () -> Db.update(sql, 1, "Транзит")).getErrorCode());
+    }
+
+    @Test
+    void invalidFlightTimeIsRejected() {
+        SQLException e = assertThrows(SQLException.class, () -> Db.update("UPDATE flights SET sched_time = '24.10.2026' WHERE id = 1"));
+        assertEquals(22007, e.getErrorCode());
     }
 
     @Test

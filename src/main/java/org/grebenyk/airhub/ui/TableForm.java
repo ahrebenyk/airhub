@@ -68,7 +68,7 @@ public class TableForm extends JInternalFrame {
         toolbar.add(search);
         toolbar.add(Ui.button("Знайти", null, e -> reload()));
         search.addActionListener(e -> reload());
-        if (editable && Db.user.canEdit()) {
+        if (editable && Db.user().canEdit()) {
             toolbar.add(Ui.button("Додати", "FileChooser.newFolderIcon", e -> edit(true)));
             toolbar.add(Ui.button("Змінити", "FileChooser.detailsViewIcon", e -> edit(false)));
             toolbar.add(Ui.button("Видалити", null, e -> delete()));
@@ -85,6 +85,7 @@ public class TableForm extends JInternalFrame {
             JComboBox<String> cb = new JComboBox<>();
             cb.addItem("(усі)");
             for (String v : values) cb.addItem(v);
+            cb.addActionListener(e -> reload());
             filters.put(col, cb);
             filter.add(new JLabel(header(col) + ":"));
             filter.add(cb);
@@ -117,13 +118,19 @@ public class TableForm extends JInternalFrame {
         StringBuilder sql = new StringBuilder("SELECT * FROM " + table + " WHERE 1=1");
         List<Object> params = new ArrayList<>();
         try {
-            if (!from.getText().isBlank()) {
-                sql.append(" AND CAST(").append(dateCol).append(" AS DATE) >= ?");
-                params.add(Date.valueOf(from.getText().trim()));
+            Date start = from.getText().isBlank() ? null : Date.valueOf(from.getText().trim());
+            Date end = to.getText().isBlank() ? null : Date.valueOf(to.getText().trim());
+            if (start != null && end != null && start.after(end)) {
+                JOptionPane.showMessageDialog(this, "Початок періоду пізніше за кінець", "Помилка", JOptionPane.ERROR_MESSAGE);
+                return;
             }
-            if (!to.getText().isBlank()) {
+            if (start != null) {
+                sql.append(" AND CAST(").append(dateCol).append(" AS DATE) >= ?");
+                params.add(start);
+            }
+            if (end != null) {
                 sql.append(" AND CAST(").append(dateCol).append(" AS DATE) <= ?");
-                params.add(Date.valueOf(to.getText().trim()));
+                params.add(end);
             }
             // item 0 of a filter list is "(усі)", i.e. no condition
             filters.forEach((col, cb) -> {
