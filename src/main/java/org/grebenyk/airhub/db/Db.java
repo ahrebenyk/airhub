@@ -1,6 +1,7 @@
 package org.grebenyk.airhub.db;
 
 import javax.swing.table.DefaultTableModel;
+import java.nio.file.Path;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -8,7 +9,9 @@ import java.util.Vector;
 
 /** H2 database access: connection, schema creation, query execution, user action log. */
 public class Db {
-    private static final String URL = "jdbc:h2:./data/airhub";
+    /** System property with the database directory, e.g. -Dairhub.data=D:/airhub. */
+    public static final String DATA_DIR_PROPERTY = "airhub.data";
+    private static final String DB_NAME = "airhub";
     private static final String DB_USER = "sa", DB_PASSWORD = "";
     private static final String ANONYMOUS = "-";
     private static final DateTimeFormatter TO_MINUTES = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -24,7 +27,25 @@ public class Db {
     private static Connection connection;
 
     public static void init() throws SQLException {
-        init(URL);
+        // H2 accepts forward slashes in a Windows path; an absolute path does not need the "./" prefix
+        init("jdbc:h2:" + file().toString().replace('\\', '/'));
+    }
+
+    /**
+     * Database directory: the airhub.data property if set; for an installed copy (started by the jpackage launcher)
+     * the user's %LOCALAPPDATA%\AirHub, because Program Files is read-only; otherwise ./data in the working directory.
+     */
+    public static Path dataDir() {
+        String dir = System.getProperty(DATA_DIR_PROPERTY);
+        if (dir != null && !dir.isBlank()) return Path.of(dir).toAbsolutePath();
+        String localAppData = System.getenv("LOCALAPPDATA");
+        if (System.getProperty("jpackage.app-path") != null && localAppData != null) return Path.of(localAppData, "AirHub");
+        return Path.of("data").toAbsolutePath();
+    }
+
+    /** Database file path without the H2 extension .mv.db. */
+    public static Path file() {
+        return dataDir().resolve(DB_NAME);
     }
 
     /** Opens the database at url (tests use an in-memory database); the session starts without a user. */

@@ -27,6 +27,7 @@ public class MainFrame extends JFrame {
             ORDER BY f.sched_time""";
 
     private final JDesktopPane desktop = new JDesktopPane();
+    private HelpForm helpForm;
 
     public MainFrame() {
         super(title(Db.setting("airport_name")));
@@ -38,6 +39,7 @@ public class MainFrame extends JFrame {
                 exit();
             }
         });
+        setIconImage(Ui.appIcon());
         setSize(WINDOW_WIDTH, WINDOW_HEIGHT);
         setLocationRelativeTo(null);
         add(desktop);
@@ -53,31 +55,34 @@ public class MainFrame extends JFrame {
         JMenu tables = new JMenu("Таблиці");
         addItem(tables, "Рейси", "FileChooser.detailsViewIcon", this::openFlights);
         addItem(tables, "Авіакомпанії", "FileView.directoryIcon",
-                () -> open(new TableForm("Авіакомпанії", "airlines", true, null, Map.of())));
+                () -> open(new TableForm("Авіакомпанії", "airlines", true, null, Map.of()), HelpForm.AIRLINES));
         bar.add(tables);
 
         if (user.canReports()) {
             JMenu analysis = new JMenu("Аналіз");
-            addItem(analysis, "Статистика рейсів", "FileChooser.listViewIcon", () -> open(new StatsForm()));
+            addItem(analysis, "Статистика рейсів", "FileChooser.listViewIcon", () -> open(new StatsForm(), HelpForm.STATS));
             bar.add(analysis);
         }
 
         if (user.isAdmin()) {
             JMenu admin = new JMenu("Адміністрування");
             addItem(admin, "Користувачі", "FileView.computerIcon", () -> open(new TableForm("Користувачі", "users", true, null,
-                    Map.of("role", ROLES, "can_edit", BOOLEANS, "can_reports", BOOLEANS))));
+                    Map.of("role", ROLES, "can_edit", BOOLEANS, "can_reports", BOOLEANS)), HelpForm.USERS));
             addItem(admin, "Журнал системи", "FileView.hardDriveIcon",
-                    () -> open(new TableForm("Журнал системи", "user_log", false, "ts", Map.of("action", ACTIONS))));
+                    () -> open(new TableForm("Журнал системи", "user_log", false, "ts", Map.of("action", ACTIONS)), HelpForm.LOG));
             addItem(admin, "Параметри системи", "FileView.floppyDriveIcon",
-                    () -> open(new TableForm("Параметри системи", "settings", true, null, Map.of())));
+                    () -> open(new TableForm("Параметри системи", "settings", true, null, Map.of()), HelpForm.SETTINGS));
             admin.addSeparator();
             addItem(admin, "Очистити старий журнал", null, this::cleanLog);
             bar.add(admin);
         }
 
         JMenu help = new JMenu("Довідка");
-        addItem(help, "Допомога", null, this::showHelp);
-        addItem(help, "Про програму", null, this::showAbout);
+        // F1 opens the help section of the active form (context help)
+        addItem(help, "Допомога", null, () -> showHelp(activeTopic()))
+                .setAccelerator(KeyStroke.getKeyStroke("F1"));
+        help.addSeparator();
+        addItem(help, "Про програму", null, () -> new AboutForm(this).setVisible(true));
         bar.add(help);
         setJMenuBar(bar);
     }
@@ -87,13 +92,16 @@ public class MainFrame extends JFrame {
         return airportName == null || airportName.isBlank() ? "AirHub" : "AirHub — " + airportName;
     }
 
-    private void addItem(JMenu menu, String text, String iconKey, Runnable action) {
+    private JMenuItem addItem(JMenu menu, String text, String iconKey, Runnable action) {
         JMenuItem item = new JMenuItem(text, iconKey == null ? null : Ui.icon(iconKey));
         item.addActionListener(e -> action.run());
         menu.add(item);
+        return item;
     }
 
-    private void open(JInternalFrame f) {
+    /** Opens a form inside the main window; helpTopic is the help section shown by F1 while the form is active. */
+    private void open(JInternalFrame f, String helpTopic) {
+        f.putClientProperty(HelpForm.TOPIC_PROPERTY, helpTopic);
         desktop.add(f);
         // each new window is offset so it does not cover the previous ones
         int offset = CASCADE_STEP * desktop.getAllFrames().length;
@@ -104,11 +112,11 @@ public class MainFrame extends JFrame {
     private void openFlights() {
         // airline_id is shown and edited as the airline name from the airlines table
         open(new TableForm("Рейси", "flights", true, "sched_time", Map.of("type", TYPES, "status", STATUSES),
-                Map.of("airline_id", "SELECT id, name FROM airlines ORDER BY name")));
+                Map.of("airline_id", "SELECT id, name FROM airlines ORDER BY name")), HelpForm.FLIGHTS);
     }
 
     private void showReport() {
-        open(new ReportForm("Звіт: розклад рейсів", SCHEDULE_SQL));
+        open(new ReportForm("Звіт: розклад рейсів", SCHEDULE_SQL), HelpForm.REPORT);
         Db.log("ЗВІТ", "Розклад рейсів");
     }
 
@@ -127,32 +135,23 @@ public class MainFrame extends JFrame {
         }
     }
 
-    // text is wrapped in a JLabel: JOptionPane splits a string on "\n" and the HTML is not recognized
-    private void showHelp() {
-        JOptionPane.showMessageDialog(this, new JLabel("""
-                <html><b>AirHub — система управління аеропортом</b><br><br>
-                <b>Таблиці</b> — перегляд і редагування рейсів та авіакомпаній.<br>
-                &nbsp;• клік по заголовку колонки — сортування;<br>
-                &nbsp;• Пошук — оберіть поле і введіть текст;<br>
-                &nbsp;• Фільтр — період (РРРР-ММ-ДД), тип, статус;<br>
-                &nbsp;• Додати / Змінити / Видалити — для користувачів з правом редагування.<br>
-                <b>Файл → Звіт</b> — розклад рейсів.<br>
-                <b>Аналіз</b> — статистика рейсів (таблиця і діаграма).<br>
-                <b>Адміністрування</b> — користувачі, журнал, параметри (тільки ADMIN).</html>"""),
-                "Допомога", JOptionPane.INFORMATION_MESSAGE);
+    /** Help topic of the active form, or the main window section when no form is open. */
+    String activeTopic() {
+        JInternalFrame f = desktop.getSelectedFrame();
+        // no form is selected while the main window is not shown or after a click on the empty desktop:
+        // the front form is used (index 0 of the layered pane is the top one)
+        if (f == null && desktop.getAllFrames().length > 0) f = desktop.getAllFrames()[0];
+        Object topic = f == null ? null : f.getClientProperty(HelpForm.TOPIC_PROPERTY);
+        return topic != null ? topic.toString() : HelpForm.MAIN;
     }
 
-    private void showAbout() {
-        JOptionPane.showMessageDialog(this, new JLabel("""
-                <html><b>AirHub</b> v%s<br>Система управління аеропортом<br><br>
-                Java + Swing (FlatLaf) + H2<br>Автор: Гребеник Артем</html>""".formatted(version())),
-                "Про програму", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    // Implementation-Version is written to the jar manifest from pom.xml; it is absent when run from the IDE
-    private static String version() {
-        String version = MainFrame.class.getPackage().getImplementationVersion();
-        return version != null ? version : "dev";
+    /** Opens the help window (a single one for the main window) on the section of the topic. */
+    HelpForm showHelp(String topic) {
+        if (helpForm == null) helpForm = new HelpForm(this);
+        helpForm.show(topic);
+        helpForm.setVisible(true);
+        helpForm.toFront();
+        return helpForm;
     }
 
     private void exit() {

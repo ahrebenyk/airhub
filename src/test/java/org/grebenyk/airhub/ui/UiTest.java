@@ -3,6 +3,7 @@ package org.grebenyk.airhub.ui;
 import org.grebenyk.airhub.db.Db;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.UIManager;
 import java.sql.SQLException;
 import java.util.UUID;
 
@@ -40,5 +41,18 @@ class UiTest {
         assertEquals("AirHub — Аеропорт Ніжин", MainFrame.title("Аеропорт Ніжин"));
         assertEquals("AirHub", MainFrame.title(null));
         assertEquals("AirHub", MainFrame.title("  "));
+    }
+
+    @Test
+    void standardDialogButtonsAreInUkrainian() {
+        Ui.localize();
+        assertEquals("Скасувати", UIManager.getString("OptionPane.cancelButtonText"));
+        assertEquals("Так", UIManager.getString("OptionPane.yesButtonText"));
+        assertEquals("Ні", UIManager.getString("OptionPane.noButtonText"));
+    }
+
+    @Test
+    void programIconIsBundled() {
+        assertNotNull(Ui.appIcon());
     }
 }

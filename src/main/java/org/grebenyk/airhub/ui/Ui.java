@@ -5,12 +5,16 @@ import org.grebenyk.airhub.db.Db;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
+import java.awt.image.BaseMultiResolutionImage;
+import java.net.URL;
 import java.sql.SQLException;
 import java.util.Map;
 
 /** Login form and shared UI helper methods. */
 public class Ui {
     private static final int LOGIN_FIELD_COLUMNS = 15;
+    // the first size is the logical size of the form icon, the others are for display scaling 125-200%
+    private static final int[] FORM_ICON_SIZES = {16, 20, 24, 32};
     // after this many failed logins the program exits, which slows down password guessing
     static final int MAX_LOGIN_ATTEMPTS = 3;
     // H2 error codes (org.h2.api.ErrorCode) -> explanation for the user
@@ -49,6 +53,35 @@ public class Ui {
         }
         JOptionPane.showMessageDialog(null, "Перевищено кількість спроб входу", "Помилка", JOptionPane.ERROR_MESSAGE);
         return false;
+    }
+
+    /** Ukrainian button texts of standard dialogs (JOptionPane): Java has no Ukrainian Swing resources. */
+    public static void localize() {
+        UIManager.put("OptionPane.okButtonText", "OK");
+        UIManager.put("OptionPane.cancelButtonText", "Скасувати");
+        UIManager.put("OptionPane.yesButtonText", "Так");
+        UIManager.put("OptionPane.noButtonText", "Ні");
+        UIManager.put("OptionPane.titleText", "Виберіть варіант");
+    }
+
+    /** Program icon (resource /icon.png) for window title bars and the taskbar, or null if it is missing. */
+    public static Image appIcon() {
+        URL url = Ui.class.getResource("/icon.png");
+        return url == null ? null : new ImageIcon(url).getImage();
+    }
+
+    /**
+     * Small program icon for the title bars of forms inside the main window (instead of the Java icon), or null.
+     * It holds several sizes so it stays sharp with Windows display scaling.
+     */
+    public static Icon formIcon() {
+        Image icon = appIcon();
+        if (icon == null) return null;
+        Image[] sizes = new Image[FORM_ICON_SIZES.length];
+        for (int i = 0; i < sizes.length; i++) {
+            sizes[i] = new ImageIcon(icon.getScaledInstance(FORM_ICON_SIZES[i], FORM_ICON_SIZES[i], Image.SCALE_SMOOTH)).getImage();
+        }
+        return new ImageIcon(new BaseMultiResolutionImage(sizes));
     }
 
     /** Built-in Swing/FlatLaf icon by UIManager key, e.g. "FileView.fileIcon". */
